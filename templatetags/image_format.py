@@ -3,8 +3,8 @@ import os.path
 
 from django import template
 
-FMT = 'JPEG'
-EXT = 'jpg'
+FMT = 'PNG'
+EXT = 'png'
 QUAL = 100
 
 register = template.Library()
@@ -37,6 +37,8 @@ def scale(imagefield, size, method='scale'):
 
     image_path = resized_path(imagefield.path, size, method)
 
+    need_resize = True
+
     if not os.path.exists(image_path):
         try:
             import Image
@@ -49,27 +51,35 @@ def scale(imagefield, size, method='scale'):
         image = Image.open(imagefield.path)
 
         # normalize image mode
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
+        if image.mode != 'RGBA' or image.mode != 'RGB':
+            image = image.convert('RGBA')
 
         # parse size string 'WIDTHxHEIGHT'
         width, height = [int(i) for i in size.split('x')]
 
+        need_resize = width != image.size[0] or height != image.size[1]
+
         # use PIL methods to edit images
-        if method == 'scale':
+        if method == 'scale' and need_resize:
+            premultiply(image)
             image.thumbnail((width, height), Image.ANTIALIAS)
+            unmultiply(image)
             image.save(image_path, FMT, quality=QUAL)
 
-        elif method == 'crop':
+        elif method == 'crop' and need_resize:
             try:
                 import ImageOps
             except ImportError:
                 from PIL import ImageOps
 
-            ImageOps.fit(image, (width, height), Image.ANTIALIAS
-                        ).save(image_path, FMT, quality=QUAL)
+            premultiply(image)
+            image = ImageOps.fit(image, (width, height), Image.ANTIALIAS)
+            unmultiply(image)
+            image.save(image_path, FMT, quality=QUAL)
 
-    return resized_path(imagefield.url, size, method)
+    if need_resize:
+        return resized_path(imagefield.url, size, method)
+    return imagefield.url
 
 
 
@@ -87,3 +97,25 @@ def crop(imagefield, size):
 
 register.filter('scale', scale)
 register.filter('crop', crop)
+
+def premultiply(im):
+    pixels = im.load()
+    for y in range(im.size[1]):
+        for x in range(im.size[0]):
+            r, g, b, a = pixels[x, y]
+            if a != 255:
+                r = r * a // 255
+                g = g * a // 255
+                b = b * a // 255
+                pixels[x, y] = (r, g, b, a)
+
+def unmultiply(im):
+    pixels = im.load()
+    for y in range(im.size[1]):
+        for x in range(im.size[0]):
+            r, g, b, a = pixels[x, y]
+            if a != 255 and a != 0:
+                r = 255 if r >= a else 255 * r // a
+                g = 255 if g >= a else 255 * g // a
+                b = 255 if b >= a else 255 * b // a
+                pixels[x, y] = (r, g, b, a)
