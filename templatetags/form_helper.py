@@ -1,3 +1,5 @@
+from django.forms.fields import Field
+
 __author__ = 'Johnny'
 
 
@@ -14,5 +16,8 @@ def field_is_required(field):
 
 @register.filter
 def field_widget(field):
-    return field.field.widget.__class__.__name__
+    if isinstance(field,Field):
+        return field.widget.__class__.__name__
+    else:
+        return field.field.widget.__class__.__name__
 
